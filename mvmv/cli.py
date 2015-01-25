@@ -46,11 +46,11 @@ def get_parser():
     parser.add_argument("-f", "--file", dest="files", metavar="FILE",
                         type=str, nargs='*', default=[],
                         help="Rename this FILE")
-    parser.add_argument("-s", "--srcdir", dest="srcdirs", metavar="SRCDIR",
-                        type=str, nargs='*', default=[],
+    parser.add_argument("-s", "--srcdir", dest="srcdir", metavar="SRCDIR",
+                        type=str,
                         help="Rename all files in this DIRECTORY")
     parser.add_argument("-t", "--destdir", dest="destdir", metavar="DESTDIR",
-                        type=str, nargs=1, action='store', required=True,
+                        type=str,
                         help="Move all the files to this directory.")
     parser.add_argument("-e", "--excludes", dest="excludes", metavar="REGEX",
                         type=str, nargs='*', default=[],
@@ -112,45 +112,49 @@ def error(message, end='\n'):
 def main():
     args = get_parser().parse_args()
 
+    args.srcdir = args.srcdir if args.srcdir else args.args.pop(0)
+    args.srcdir = path.abspath(args.srcdir)
+
+    if path.isdir(args.srcdir):
+        args.srcdir = path.abspath(args.srcdir)
+    elif path.isfile(args.srcdir):
+        args.files.append(args.srcdir)
+        args.srcdir = None
+    else:
+        error("'%s' is not a directory or a file" % args.srcdir)
+        sys.exit(1)
+
     args.files = [path.abspath(fname) for fname in args.files
                   if mvmv.is_valid_file(fname, args.excludes)]
 
-    args.srcdirs = [path.abspath(sdir) for sdir in args.srcdirs
-                    if path.isdir(sdir)]
-
-    args.destdir = path.abspath(args.destdir[0])
-
-    for arg in args.args:
-        if path.isdir(arg):
-            args.srcdirs.append(path.abspath(arg))
-        elif mvmv.is_valid_file(arg):
-            args.files.append(arg)
-
-    if not path.isdir(args.destdir[0]):
-        error("'%s' is not a directory." % args.destdir[0])
-        sys.exit(1)
-    if not args.srcdirs and not args.files:
+    if not args.srcdir and not args.files:
         error("You must specify a directory or filename in the commandline.")
+        sys.exit(1)
+
+    args.destdir = args.destdir if args.destdir else args.args.pop(0)
+    args.destdir = path.abspath(args.destdir)
+    if not path.isdir(args.destdir):
+        error("'%s' is not a directory." % args.destdir)
         sys.exit(1)
 
     conn = sqlite3.connect(args.dbpath)
     cursor = conn.cursor()
-    args.excludes = [re.compile(a) for a in args.excludes]
+    args.excludes = [re.compile(exclude) for exclude in args.excludes]
 
     if args.stop_daemon:
         mvmvd.mvmvd(args.pidfile).stop()
 
     if args.watch:
         mvmvd.mvmvd(args.pidfile,
-                dirs=args.srcdirs,
-                dest=args.destdir,
-                recursive=args.recursive).start()
+                    dirs=list(args.srcdir),
+                    dest=args.destdir,
+                    recursive=args.recursive).start()
 
     for query in args.files:
         mvmv.movemovie(path.split(path.abspath(query)), args.destdir, cursor)
 
-    for dirname in args.srcdirs:
-        mvmv.movemovies(dirname, args.destdir, cursor, args.excludes)
+    if args.srcdir:
+        mvmv.movemovies(args.srcdir, args.destdir, cursor, args.excludes)
 
     conn.close()
 
